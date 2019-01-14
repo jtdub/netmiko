@@ -17,6 +17,7 @@ from netmiko.ssh_exception import NetMikoAuthenticationException
 from netmiko.ssh_autodetect import SSHDetect
 from netmiko.base_connection import BaseConnection
 from netmiko.scp_functions import file_transfer
+from netmiko.arbiter import CommandBufferArbiter
 
 # Alternate naming
 NetmikoTimeoutError = NetMikoTimeoutException
@@ -40,6 +41,7 @@ __all__ = (
     "BaseConnection",
     "Netmiko",
     "file_transfer",
+    "CommandBufferArbiter",
 )
 
 # Cisco cntl-shift-six sequence

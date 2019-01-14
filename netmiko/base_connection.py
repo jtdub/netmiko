@@ -30,6 +30,7 @@ from netmiko.ssh_exception import (
     NetMikoAuthenticationException,
 )
 from netmiko.utilities import write_bytes, check_serial_port, get_structured_data
+from netmiko.arbiter import CommandBufferArbiter
 
 
 class BaseConnection(object):
@@ -1508,6 +1509,7 @@ class BaseConnection(object):
         strip_prompt=False,
         strip_command=False,
         config_mode_command=None,
+        command_arbiter=False,
     ):
         """
         Send configuration commands down the SSH channel.
@@ -1537,6 +1539,9 @@ class BaseConnection(object):
 
         :param config_mode_command: The command to enter into config mode
         :type config_mode_command: str
+
+        :param command_arbiter: Continually read the output of send_config_set to limit write speed
+        :type command_arbiter: bool
         """
         delay_factor = self.select_delay_factor(delay_factor)
         if config_commands is None:
@@ -1550,17 +1555,41 @@ class BaseConnection(object):
         # Send config commands
         cfg_mode_args = (config_mode_command,) if config_mode_command else tuple()
         output = self.config_mode(*cfg_mode_args)
-        for cmd in config_commands:
-            self.write_channel(self.normalize_cmd(cmd))
-            if self.fast_cli:
-                pass
-            else:
-                time.sleep(delay_factor * 0.05)
 
-        # Gather output
-        output += self._read_channel_timing(
-            delay_factor=delay_factor, max_loops=max_loops
-        )
+        if command_arbiter:
+            commands = iter(config_commands)
+            cba = CommandBufferArbiter(self.host)
+            while True:
+                done = False
+                number_of_commands_to_send = cba.how_many_more_commands_can_be_sent(self.read_channel())
+
+                for _ in range(number_of_commands_to_send):
+                    try:
+                        command = self.normalize_cmd(next(commands))
+                        self.write_channel(command)
+                    except StopIteration:
+                        done = True
+                        break
+                    time.sleep(delay_factor * 0.05)
+
+                if done:
+                    break
+
+                time.sleep(delay_factor * 0.05)
+            output += cba.all_output()
+        else:
+            for cmd in config_commands:
+                self.write_channel(self.normalize_cmd(cmd))
+                if self.fast_cli:
+                    pass
+                else:
+                    time.sleep(delay_factor * 0.05)
+
+            # Gather output
+            output += self._read_channel_timing(
+                delay_factor=delay_factor, max_loops=max_loops
+            )
+
         if exit_config_mode:
             output += self.exit_config_mode()
         output = self._sanitize_output(output)
